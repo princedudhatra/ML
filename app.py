@@ -1,6 +1,10 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+
 
 st.markdown("""
 <style>
@@ -63,9 +67,21 @@ st.set_page_config(
 )
 
 # -------------------- LOAD MODEL --------------------
-saved = joblib.load("cardio_model.pkl")
+
+@st.cache_resource(show_spinner="Loading ML model...")
+def load_model():
+    model_path = os.path.join(os.path.dirname(__file__), "cardio_model.pkl")
+    saved = joblib.load(model_path)
+    return saved
+
+saved = load_model()
+
 model = saved["model"]
 columns = saved["columns"]
+
+# Backward compatibility for analysis metrics
+has_analysis = "train_accuracy" in saved
+
 
 # -------------------- HEADER --------------------
 st.markdown("<h1>🫀 Cardiovascular Health Risk Assessment</h1>", unsafe_allow_html=True)
@@ -212,8 +228,70 @@ if predict_clicked:
 
 
 # -------------------- DOCTOR SUMMARY --------------------
-if 'risk_level' in locals():
+if predict_clicked:
     st.markdown(doctor_summary(risk_level))
+
+# -------------------- VIEW DETAILED MODEL ANALYSIS --------------------
+if has_analysis:
+    with st.expander("🔬 View Detailed Model Analysis", expanded=False):
+        st.markdown("#### 📈 Key metrics")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Training Accuracy", f"{saved['train_accuracy']:.2%}")
+        with col2:
+            st.metric("Testing Accuracy", f"{saved['test_accuracy']:.2%}")
+        with col3:
+            st.metric("5-Fold CV Score", f"{saved['cv_score']:.2%}")
+
+        if "model_comparison" in saved:
+            st.markdown("#### 📊 Model comparison")
+            comp = pd.DataFrame.from_dict(saved["model_comparison"], orient="index")
+            st.dataframe(comp.style.format("{:.4f}"), use_container_width=True)
+
+        if "feature_importance" in saved:
+            st.markdown("#### 📉 Feature importance")
+            fi = saved["feature_importance"]
+            fig, ax = plt.subplots(figsize=(10, 4))
+            names = list(fi.keys())
+            vals = list(fi.values())
+            ax.barh(range(len(names)), vals, color="steelblue", alpha=0.8)
+            ax.set_yticks(range(len(names)))
+            ax.set_yticklabels(names)
+            ax.set_xlabel("Importance")
+            ax.set_title("Feature Importance")
+            ax.invert_yaxis()
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+
+        if "roc_fpr" in saved and "roc_tpr" in saved:
+            st.markdown("#### 📈 ROC curve")
+            fig, ax = plt.subplots(figsize=(6, 5))
+            ax.plot(saved["roc_fpr"], saved["roc_tpr"], label="ROC curve", color="darkorange")
+            ax.plot([0, 1], [0, 1], "k--")
+            ax.set_xlabel("False Positive Rate")
+            ax.set_ylabel("True Positive Rate")
+            ax.set_title("ROC Curve")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+
+        if "learning_curve" in saved:
+            lc = saved["learning_curve"]
+            st.markdown("#### 📈 Learning curve")
+            fig, ax = plt.subplots(figsize=(8, 5))
+            ax.plot(lc["train_sizes"], lc["train_scores_mean"], "o-", label="Training score")
+            ax.plot(lc["train_sizes"], lc["test_scores_mean"], "o-", label="Cross-validation score")
+            ax.set_xlabel("Training set size")
+            ax.set_ylabel("Accuracy")
+            ax.set_title("Learning Curve")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
 
 # -------------------- FOOTER --------------------
 st.markdown(
